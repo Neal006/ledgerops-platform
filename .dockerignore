@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.git
+.github
+infra
+docs
+observability
+**/*.md
+**/.env
+**/.env.*
