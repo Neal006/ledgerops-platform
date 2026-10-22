@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { type JournalInput, type Ledger, LedgerError, type NewAccount } from "./ledger.js";
+import type { Metrics } from "./metrics.js";
 
 const accountBody = {
   type: "object",
@@ -40,7 +41,7 @@ const journalBody = {
   },
 } as const;
 
-export function registerLedgerRoutes(app: FastifyInstance, ledger: Ledger): void {
+export function registerLedgerRoutes(app: FastifyInstance, ledger: Ledger, metrics: Metrics): void {
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof LedgerError) {
       return reply.code(err.statusCode).send({ error: err.code, message: err.message });
@@ -63,7 +64,14 @@ export function registerLedgerRoutes(app: FastifyInstance, ledger: Ledger): void
   app.get<{ Params: { code: string } }>("/v1/accounts/:code/balance", async (req) => ledger.getBalance(req.params.code));
 
   app.post<{ Body: JournalInput }>("/v1/journal-entries", { schema: { body: journalBody } }, async (req, reply) => {
-    const result = await ledger.postJournal(req.body);
+    let result;
+    try {
+      result = await ledger.postJournal(req.body);
+    } catch (err) {
+      metrics.journalEntries.inc({ result: err instanceof LedgerError ? err.code : "error" });
+      throw err;
+    }
+    metrics.journalEntries.inc({ result: result.replayed ? "replayed" : "posted" });
     return reply.code(result.replayed ? 200 : 201).send(result);
   });
 }

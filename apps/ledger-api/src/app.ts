@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type pg from "pg";
 import type { Config } from "./config.js";
 import { Ledger } from "./ledger.js";
+import { registerMetrics } from "./metrics.js";
 import { registerLedgerRoutes } from "./routes.js";
 
 export interface AppDeps {
@@ -40,7 +41,8 @@ export function buildApp({ config, pool }: AppDeps): FastifyInstance {
     }
   });
 
-  registerLedgerRoutes(app, new Ledger(pool, config.book));
+  const metrics = registerMetrics(app, pool, { service: config.serviceName, env: config.environment, book: config.book });
+  registerLedgerRoutes(app, new Ledger(pool, config.book), metrics);
 
   return app;
 }
