@@ -1,6 +1,8 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import type pg from "pg";
 import type { Config } from "./config.js";
+import { Ledger } from "./ledger.js";
+import { registerLedgerRoutes } from "./routes.js";
 
 export interface AppDeps {
   config: Config;
@@ -37,6 +39,8 @@ export function buildApp({ config, pool }: AppDeps): FastifyInstance {
       return reply.code(503).send({ status: "db_unavailable" });
     }
   });
+
+  registerLedgerRoutes(app, new Ledger(pool, config.book));
 
   return app;
 }
