@@ -1,0 +1,10 @@
+# Postgres migration linter (https://squawkhq.com). Runs in CI on every migration.
+excluded_rules = [
+  # The migrator (apps/ledger-api/src/migrate.ts) sets lock_timeout and statement_timeout for
+  # the whole session before applying anything, so per-file SET statements would be redundant.
+  "require-lock-timeout",
+  "require-statement-timeout",
+  # Each transactional migration is atomic and recorded in schema_migrations, so a failed one
+  # rolls back cleanly and is simply re-run; IF NOT EXISTS would only mask drift.
+  "prefer-robust-stmts",
+]

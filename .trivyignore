@@ -1,0 +1,8 @@
+# Accepted IaC findings. Every entry needs a reason; review quarterly.
+
+# ALB is public by design: it is the API's only entry point (TLS 1.3, /metrics blocked; WAF on roadmap).
+AWS-0053
+# ALB must accept HTTPS from the internet for the same reason.
+AWS-0107
+# Task and endpoint security groups allow egress to 0.0.0.0/0 so tasks can reach broker APIs via NAT.
+AWS-0104

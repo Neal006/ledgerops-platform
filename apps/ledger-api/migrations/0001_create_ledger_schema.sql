@@ -6,7 +6,7 @@ CREATE TABLE accounts (
   code        text NOT NULL UNIQUE,
   name        text NOT NULL,
   type        text NOT NULL CHECK (type IN ('asset', 'liability', 'equity', 'revenue', 'expense')),
-  currency    char(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  currency    text NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   book        text NOT NULL CHECK (book IN ('IN', 'AE')),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
@@ -25,10 +25,13 @@ CREATE TABLE postings (
   journal_entry_id  uuid NOT NULL REFERENCES journal_entries (id),
   account_id        uuid NOT NULL REFERENCES accounts (id),
   amount_minor      bigint NOT NULL CHECK (amount_minor <> 0),
-  currency          char(3) NOT NULL
+  currency          text NOT NULL CHECK (currency ~ '^[A-Z]{3}$')
 );
 
+-- Indexes on a table created in this same migration: it is empty, so a blocking build is instant.
+-- squawk-ignore require-concurrent-index-creation
 CREATE INDEX postings_journal_entry_id_idx ON postings (journal_entry_id);
+-- squawk-ignore require-concurrent-index-creation
 CREATE INDEX postings_account_id_idx ON postings (account_id);
 
 -- Defence in depth: the API validates balance, but the database refuses to commit an
