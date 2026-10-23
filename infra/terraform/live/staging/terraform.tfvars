@@ -1,0 +1,13 @@
+aws_account_id         = "111111111111" # replace with your account ID
+environment            = "staging"
+book                   = "IN"
+vpc_cidr               = "10.10.0.0/16"
+az_count               = 2
+single_nat_gateway     = true # one NAT is fine below production
+domain_name            = "ledger.staging.example.com"
+hosted_zone_id         = "Z0000000000000STAGING"
+api_desired_count      = 1
+db_instance_class      = "db.t4g.small"
+db_multi_az            = false
+db_deletion_protection = false
+recon_timezone         = "Asia/Kolkata"
