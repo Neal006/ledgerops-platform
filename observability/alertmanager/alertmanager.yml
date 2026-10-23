@@ -23,5 +23,4 @@ receivers:
 inhibit_rules:
   # If the API is completely down, don't also page for every SLO burning because of it.
   - source_matchers: [alertname="LedgerApiDown"]
-    target_matchers: [service="ledger-api"]
-    equal: [book]
+    target_matchers: [service="ledger-api", alertname!="LedgerApiDown"]
