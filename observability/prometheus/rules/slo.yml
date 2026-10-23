@@ -1,0 +1,127 @@
+# SLOs for the ledger API (see docs/slos.md for rationale).
+#   Availability: 99.9% of /v1 requests return non-5xx over 30 days  -> error budget 0.1%
+#   Latency:      99% of /v1 requests complete in <= 300ms over 30 days
+# Alerts use multi-window, multi-burn-rate (Google SRE Workbook ch.5): fast burns page,
+# slow burns open a ticket. The short window makes alerts reset quickly once fixed.
+groups:
+  - name: ledger-api-slo-recording
+    interval: 30s
+    rules:
+      - record: slo:ledger_api_requests:rate5m
+        expr: sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[5m]))
+      - record: slo:ledger_api_errors:ratio_rate5m
+        expr: |
+          sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*", status_code=~"5.."}[5m]))
+          / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[5m]))
+      - record: slo:ledger_api_errors:ratio_rate30m
+        expr: |
+          sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*", status_code=~"5.."}[30m]))
+          / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[30m]))
+      - record: slo:ledger_api_errors:ratio_rate1h
+        expr: |
+          sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*", status_code=~"5.."}[1h]))
+          / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[1h]))
+      - record: slo:ledger_api_errors:ratio_rate6h
+        expr: |
+          sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*", status_code=~"5.."}[6h]))
+          / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[6h]))
+      - record: slo:ledger_api_errors:ratio_rate3d
+        expr: |
+          sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*", status_code=~"5.."}[3d]))
+          / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[3d]))
+      - record: slo:ledger_api_availability:ratio_rate30d
+        expr: |
+          1 - (
+            sum by (book) (increase(http_server_request_duration_seconds_count{route=~"/v1/.*", status_code=~"5.."}[30d]))
+            / sum by (book) (increase(http_server_request_duration_seconds_count{route=~"/v1/.*"}[30d]))
+          )
+      - record: slo:ledger_api_availability:error_budget_remaining
+        expr: 1 - ((1 - slo:ledger_api_availability:ratio_rate30d) / 0.001)
+      # Fraction of requests slower than the 300ms threshold (0.3 is an exact histogram bucket edge).
+      - record: slo:ledger_api_slow:ratio_rate1h
+        expr: |
+          1 - (
+            sum by (book) (rate(http_server_request_duration_seconds_bucket{route=~"/v1/.*", le="0.3"}[1h]))
+            / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[1h]))
+          )
+      - record: slo:ledger_api_slow:ratio_rate5m
+        expr: |
+          1 - (
+            sum by (book) (rate(http_server_request_duration_seconds_bucket{route=~"/v1/.*", le="0.3"}[5m]))
+            / sum by (book) (rate(http_server_request_duration_seconds_count{route=~"/v1/.*"}[5m]))
+          )
+
+  - name: ledger-api-slo-alerts
+    rules:
+      - alert: LedgerApiErrorBudgetFastBurn
+        # 14.4x burn for 1h spends 2% of the 30-day budget; at this rate it's gone in ~2 days.
+        expr: |
+          slo:ledger_api_errors:ratio_rate1h > (14.4 * 0.001)
+          and slo:ledger_api_errors:ratio_rate5m > (14.4 * 0.001)
+        for: 2m
+        labels: { severity: page, service: ledger-api }
+        annotations:
+          summary: "Ledger API burning error budget at >14x ({{ $labels.book }})"
+          runbook: docs/runbooks/high-error-rate.md
+      - alert: LedgerApiErrorBudgetMediumBurn
+        expr: |
+          slo:ledger_api_errors:ratio_rate6h > (6 * 0.001)
+          and slo:ledger_api_errors:ratio_rate30m > (6 * 0.001)
+        for: 15m
+        labels: { severity: page, service: ledger-api }
+        annotations:
+          summary: "Ledger API burning error budget at >6x for 6h ({{ $labels.book }})"
+          runbook: docs/runbooks/high-error-rate.md
+      - alert: LedgerApiErrorBudgetSlowBurn
+        expr: |
+          slo:ledger_api_errors:ratio_rate3d > 0.001
+          and slo:ledger_api_errors:ratio_rate6h > 0.001
+        for: 1h
+        labels: { severity: ticket, service: ledger-api }
+        annotations:
+          summary: "Ledger API on track to exhaust its monthly error budget ({{ $labels.book }})"
+          runbook: docs/runbooks/high-error-rate.md
+      - alert: LedgerApiLatencySloBurn
+        # Latency SLO allows 1% slow requests; page at 10x that.
+        expr: |
+          slo:ledger_api_slow:ratio_rate1h > (10 * 0.01)
+          and slo:ledger_api_slow:ratio_rate5m > (10 * 0.01)
+        for: 5m
+        labels: { severity: page, service: ledger-api }
+        annotations:
+          summary: "Over 10% of ledger requests slower than 300ms ({{ $labels.book }})"
+          runbook: docs/runbooks/high-latency.md
+
+  - name: ledger-api-symptoms
+    rules:
+      - alert: LedgerApiDown
+        expr: up{job="ledger-api"} == 0
+        for: 2m
+        labels: { severity: page, service: ledger-api }
+        annotations:
+          summary: Ledger API is not being scraped
+          runbook: docs/runbooks/high-error-rate.md
+      - alert: DbPoolSaturated
+        # Requests queueing for a connection precede timeouts; catch it before the SLO burns.
+        expr: max by (book) (db_pool_connections{state="waiting"}) > 0
+        for: 5m
+        labels: { severity: ticket, service: ledger-api }
+        annotations:
+          summary: "Ledger API requests are waiting for DB connections ({{ $labels.book }})"
+          runbook: docs/runbooks/db-connection-exhaustion.md
+
+  - name: reconciliation
+    rules:
+      - alert: ReconBreaksDetected
+        expr: max by (book) (recon_breaks) > 0
+        labels: { severity: page, service: recon-worker }
+        annotations:
+          summary: "{{ $value }} reconciliation break(s) in book {{ $labels.book }}"
+          runbook: docs/runbooks/recon-breaks.md
+      - alert: ReconStale
+        # Dead man's switch: the job is daily, so >26h without success means it failed or never ran.
+        expr: (time() - max by (book) (recon_last_success_timestamp_seconds)) > 26 * 3600
+        labels: { severity: page, service: recon-worker }
+        annotations:
+          summary: "No successful reconciliation for book {{ $labels.book }} in over 26h"
+          runbook: docs/runbooks/recon-breaks.md
