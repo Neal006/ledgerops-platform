@@ -1,0 +1,94 @@
+name: deploy
+
+# Build once, promote the same immutable image: staging -> prod-in -> prod-ae.
+# Production environments require a reviewer's approval in GitHub before the job starts.
+
+on:
+  push:
+    branches: [main]
+    paths: ["apps/**", "pnpm-lock.yaml", "scripts/deploy.sh", "scripts/lib.sh", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # never interrupt a rollout half way
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    if: vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    strategy:
+      matrix:
+        include:
+          - { name: ledger-api, context: ., dockerfile: apps/ledger-api/Dockerfile }
+          - { name: recon-worker, context: apps/recon-worker, dockerfile: apps/recon-worker/Dockerfile }
+    steps:
+      - uses: actions/checkout@v7
+      - id: meta
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-deploy
+          aws-region: ap-south-1
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ${{ steps.ecr.outputs.registry }}/ledgerops/${{ matrix.name }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  staging:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://ledger.staging.example.com
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-deploy
+          aws-region: ap-south-1
+      - run: ./scripts/deploy.sh staging "${{ needs.build.outputs.tag }}"
+        env:
+          GIT_SHA: ${{ github.sha }}
+
+  production:
+    needs: [build, staging]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1 # one jurisdiction at a time limits blast radius
+      fail-fast: true
+      matrix:
+        include:
+          - { env: prod-in, environment: production-in, region: ap-south-1, url: "https://ledger.in.example.com" }
+          - { env: prod-ae, environment: production-ae, region: me-central-1, url: "https://ledger.ae.example.com" }
+    environment:
+      name: ${{ matrix.environment }}
+      url: ${{ matrix.url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-deploy
+          aws-region: ${{ matrix.region }}
+      - run: ./scripts/deploy.sh "${{ matrix.env }}" "${{ needs.build.outputs.tag }}"
+        env:
+          GIT_SHA: ${{ github.sha }}

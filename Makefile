@@ -36,3 +36,15 @@ test: ## Run all tests
 lint: ## Lint and typecheck everything
 	pnpm turbo run lint typecheck
 	cd apps/recon-worker && uv run ruff check . && uv run ruff format --check .
+
+## ---- Release (requires AWS credentials for the target account) ----
+.PHONY: deploy rollback check-migrations
+deploy: ## Deploy an image tag: make deploy ENV=staging TAG=<sha>
+	./scripts/deploy.sh $(ENV) $(TAG)
+
+rollback: ## Roll back to the previous revision: make rollback ENV=prod-in [REV=42]
+	./scripts/rollback.sh $(ENV) $(REV)
+
+check-migrations: ## Run the migration safety gate locally
+	./scripts/check-migrations.sh
+	npx --yes squawk-cli@2 apps/ledger-api/migrations/*.sql

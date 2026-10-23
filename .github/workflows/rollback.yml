@@ -1,0 +1,43 @@
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to roll back
+        type: choice
+        options: [staging, prod-in, prod-ae]
+        required: true
+      revision:
+        description: Task definition revision (blank = the one before current)
+        type: string
+        required: false
+      reason:
+        description: Why (recorded in the run log for the change record)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'staging' && 'staging' || (inputs.environment == 'prod-in' && 'production-in' || 'production-ae') }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-deploy
+          aws-region: ${{ inputs.environment == 'prod-ae' && 'me-central-1' || 'ap-south-1' }}
+      - name: Roll back
+        env:
+          REASON: ${{ inputs.reason }}
+        run: |
+          echo "Rollback of ${{ inputs.environment }} requested by ${{ github.actor }}: $REASON" | tee -a "$GITHUB_STEP_SUMMARY"
+          ./scripts/rollback.sh "${{ inputs.environment }}" "${{ inputs.revision }}"
