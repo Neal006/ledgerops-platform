@@ -18,7 +18,6 @@ export function buildApp({ config, pool }: AppDeps): FastifyInstance {
       redact: ["req.headers.authorization", "req.headers.cookie"],
     },
     requestIdHeader: "x-request-id",
-    disableRequestLogging: false,
   });
 
   let shuttingDown = false;
