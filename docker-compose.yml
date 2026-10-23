@@ -1,0 +1,60 @@
+# Local development stack. Mirrors production topology (migrate-then-serve, scheduled recon job)
+# with throwaway credentials. Nothing here can reach AWS.
+name: ledgerops
+
+x-ledger-env: &ledger-env
+  APP_ENV: local
+  LEDGER_BOOK: IN
+  DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger
+  LOG_LEVEL: info
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      POSTGRES_DB: ledger
+    command: ["postgres", "-c", "log_min_duration_statement=250", "-c", "max_connections=50"]
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # One-shot migration job, exactly like the pre-deploy ECS task in staging/prod.
+  migrate:
+    build: { context: ., dockerfile: apps/ledger-api/Dockerfile }
+    image: ledgerops/ledger-api:local
+    command: ["dist/migrate.js"]
+    environment: *ledger-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  ledger-api:
+    image: ledgerops/ledger-api:local
+    environment: *ledger-env
+    ports: ["3000:3000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    stop_grace_period: 30s
+
+  recon-worker:
+    build: { context: apps/recon-worker }
+    image: ledgerops/recon-worker:local
+    profiles: ["jobs"]
+    environment:
+      APP_ENV: local
+      LEDGER_BOOK: IN
+      DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger
+      STATEMENT_URI: /fixtures/statement-sample.csv
+      PUSHGATEWAY_URL: http://pushgateway:9091
+    volumes: ["./apps/recon-worker/fixtures:/fixtures:ro"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+volumes:
+  pgdata:

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type pg from "pg";
 import { buildApp } from "../src/app.js";
-import { loadConfig } from "../src/config.js";
+import { assertSafeTarget, loadConfig } from "../src/config.js";
 
 function fakePool(healthy: boolean): pg.Pool {
   return {
@@ -56,5 +56,19 @@ describe("request validation", () => {
     const res = await app.inject({ method: "POST", url: "/v1/journal-entries", payload: { description: "x" } });
     assert.equal(res.statusCode, 400);
     assert.equal(res.json().error, "invalid_request");
+  });
+});
+
+describe("local guardrail", () => {
+  it("refuses to connect a local environment to an RDS host", () => {
+    assert.throws(
+      () => assertSafeTarget("local", "postgres://u:p@prod.abc123.ap-south-1.rds.amazonaws.com:5432/ledger"),
+      /refuses/,
+    );
+  });
+
+  it("allows local hosts and non-local environments", () => {
+    assertSafeTarget("local", "postgres://u:p@localhost:5432/ledger");
+    assertSafeTarget("production", "postgres://u:p@prod.abc123.ap-south-1.rds.amazonaws.com:5432/ledger");
   });
 });

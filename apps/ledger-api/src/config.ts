@@ -23,13 +23,24 @@ function int(name: string, fallback: number): number {
   return value;
 }
 
+// Guardrail: a developer machine must never point at a managed (production-class) database.
+export function assertSafeTarget(environment: string, connectionString: string | undefined): void {
+  if (environment !== "local") return;
+  const host = connectionString ? new URL(connectionString).hostname : (process.env.PGHOST ?? "");
+  if (/\.rds\.amazonaws\.com$|\.proxy-[a-z0-9]+\./i.test(host)) {
+    throw new Error(`APP_ENV=local refuses to connect to managed database host ${host}`);
+  }
+}
+
 export function loadConfig(): Config {
+  const environment = process.env.APP_ENV ?? "local";
+  assertSafeTarget(environment, process.env.DATABASE_URL);
   return {
     port: int("PORT", 3000),
     host: process.env.HOST ?? "0.0.0.0",
     logLevel: process.env.LOG_LEVEL ?? "info",
     serviceName: process.env.SERVICE_NAME ?? "ledger-api",
-    environment: process.env.APP_ENV ?? "local",
+    environment,
     book: process.env.LEDGER_BOOK ?? "IN",
     db: {
       // When unset, pg falls back to the standard PGHOST/PGUSER/PGPASSWORD/PGSSLMODE variables,
