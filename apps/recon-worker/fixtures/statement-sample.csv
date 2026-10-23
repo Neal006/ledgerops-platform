@@ -1,0 +1,3 @@
+account_code,currency,balance
+BROKER:ALPACA:USD,USD,2500.00
+BROKER:ALPACA:AED,AED,0.00
