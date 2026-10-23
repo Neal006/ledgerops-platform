@@ -1,0 +1,6 @@
+# Accepted IaC findings. Every entry needs a reason; review quarterly.
+
+# ALB must accept HTTPS from the internet: it is the public API entry point (WAF is on the roadmap).
+AVD-AWS-0107
+# Task and endpoint security groups allow egress to 0.0.0.0/0 so tasks can reach broker APIs via NAT.
+AVD-AWS-0104

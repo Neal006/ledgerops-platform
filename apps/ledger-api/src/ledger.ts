@@ -173,7 +173,7 @@ export class Ledger {
 
       await client.query(
         `INSERT INTO postings (journal_entry_id, account_id, amount_minor, currency)
-         SELECT $1, unnest($2::uuid[]), unnest($3::bigint[]), unnest($4::char(3)[])`,
+         SELECT $1, unnest($2::uuid[]), unnest($3::bigint[]), unnest($4::text[])`,
         [
           entryId,
           input.postings.map((p) => byCode.get(p.account_code)!.id),

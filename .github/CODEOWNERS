@@ -1,0 +1,5 @@
+# Infrastructure, pipelines and schema changes need a platform review.
+*                                  @Neal006
+/infra/                            @Neal006
+/.github/                          @Neal006
+/apps/ledger-api/migrations/       @Neal006
