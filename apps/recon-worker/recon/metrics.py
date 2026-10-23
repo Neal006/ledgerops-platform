@@ -68,6 +68,9 @@ def push_prometheus(gateway: str, result: Result, environment: str, book: str, d
     ).set(duration_s)
     # Dead man's switch: alert when this timestamp goes stale, which catches jobs that never ran at all.
     Gauge(
-        "recon_last_success_timestamp_seconds", "Unix time of the last successful run", labels, registry=registry
+        "recon_last_success_timestamp_seconds",
+        "Unix time of the last successful run",
+        labels,
+        registry=registry,
     ).labels(environment, book).set_to_current_time()
     push_to_gateway(gateway, job="recon-worker", grouping_key={"book": book}, registry=registry)
