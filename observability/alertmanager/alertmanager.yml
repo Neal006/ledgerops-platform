@@ -1,0 +1,27 @@
+# Local routing. In AWS the equivalent is CloudWatch alarms -> SNS -> chat/paging (see infra/terraform).
+route:
+  receiver: chat
+  group_by: [alertname, service, book]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="page"]
+      receiver: pager
+      repeat_interval: 1h
+
+receivers:
+  - name: chat
+    webhook_configs:
+      - url: http://host.docker.internal:9099/chat   # point at a Slack/Teams relay
+        send_resolved: true
+  - name: pager
+    webhook_configs:
+      - url: http://host.docker.internal:9099/page   # point at PagerDuty/Opsgenie
+        send_resolved: true
+
+inhibit_rules:
+  # If the API is completely down, don't also page for every SLO burning because of it.
+  - source_matchers: [alertname="LedgerApiDown"]
+    target_matchers: [service="ledger-api"]
+    equal: [book]

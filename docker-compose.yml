@@ -56,5 +56,36 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
 
+  pushgateway:
+    image: prom/pushgateway:v1.11.1
+    ports: ["9091:9091"]
+
+  prometheus:
+    image: prom/prometheus:v3.7.2
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+    ports: ["9090:9090"]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes:
+      - ./observability/alertmanager:/etc/alertmanager:ro
+    ports: ["9093:9093"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/ledger-api.json
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
 volumes:
   pgdata:
