@@ -1,0 +1,146 @@
+name: terraform
+
+on:
+  pull_request:
+    paths: ["infra/terraform/**", ".github/workflows/terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**", ".github/workflows/terraform.yml"]
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VERSION: "1.17.0"
+
+jobs:
+  static:
+    name: fmt / validate / lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: terraform-linters/setup-tflint@v6
+      - run: terraform fmt -check -recursive -diff infra/terraform
+      - name: Validate and lint every root stack
+        working-directory: infra/terraform
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          for stack in bootstrap live/*; do
+            echo "::group::$stack"
+            terraform -chdir="$stack" init -backend=false -lockfile=readonly
+            terraform -chdir="$stack" validate
+            tflint --chdir="$stack" --config "$PWD/.tflint.hcl" --call-module-type=local
+            echo "::endgroup::"
+          done
+
+  # Plans run with a read-only role so every reviewer sees the exact infra diff on the PR.
+  plan:
+    name: plan (${{ matrix.stack }})
+    needs: static
+    if: github.event_name == 'pull_request' && vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [global, staging, prod-in, prod-ae]
+    defaults:
+      run:
+        working-directory: infra/terraform/live/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-terraform-plan
+          aws-region: ap-south-1
+      - run: terraform init -backend-config="bucket=ledgerops-tfstate-${{ vars.AWS_ACCOUNT_ID }}"
+      - id: plan
+        run: |
+          args=()
+          [ "${{ matrix.stack }}" != global ] && args+=(-var "aws_account_id=${{ vars.AWS_ACCOUNT_ID }}")
+          set +e
+          terraform plan -lock=false -no-color -detailed-exitcode "${args[@]}" -out=tfplan > plan.txt 2>&1
+          code=$?
+          set -e
+          cat plan.txt
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          [ $code -eq 1 ] && exit 1 || exit 0
+      - name: Comment plan on PR
+        uses: actions/github-script@v9
+        env:
+          STACK: ${{ matrix.stack }}
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `infra/terraform/live/${process.env.STACK}/plan.txt`;
+            let plan = fs.readFileSync(path, 'utf8');
+            if (plan.length > 60000) plan = plan.slice(-60000);
+            const summary = (plan.match(/^Plan: .*$/m) || ['No changes.'])[0];
+            const marker = `<!-- tf-plan:${process.env.STACK} -->`;
+            const body = `${marker}\n### Terraform plan: \`${process.env.STACK}\`\n**${summary}**\n<details><summary>Show plan</summary>\n\n\`\`\`hcl\n${plan}\n\`\`\`\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            else await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+
+  # Applies run on main, one stack at a time, each behind its GitHub environment's approval rule.
+  apply:
+    name: apply (${{ matrix.stack }})
+    needs: static
+    if: github.event_name == 'push' && vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    concurrency: terraform-apply-${{ matrix.stack }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        include:
+          - { stack: global, environment: production-in }
+          - { stack: staging, environment: staging }
+          - { stack: prod-in, environment: production-in }
+          - { stack: prod-ae, environment: production-ae }
+    environment: ${{ matrix.environment }}
+    defaults:
+      run:
+        working-directory: infra/terraform/live/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/gha-terraform-apply
+          aws-region: ap-south-1
+      - run: terraform init -backend-config="bucket=ledgerops-tfstate-${{ vars.AWS_ACCOUNT_ID }}"
+      - name: Plan
+        run: |
+          args=()
+          [ "${{ matrix.stack }}" != global ] && args+=(-var "aws_account_id=${{ vars.AWS_ACCOUNT_ID }}")
+          terraform plan -no-color "${args[@]}" -out=tfplan | tee plan.txt
+      - name: Apply exactly the reviewed plan
+        run: terraform apply -no-color tfplan
+      - name: Record change evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tf-${{ matrix.stack }}-${{ github.sha }}
+          path: infra/terraform/live/${{ matrix.stack }}/plan.txt
+          retention-days: 400
