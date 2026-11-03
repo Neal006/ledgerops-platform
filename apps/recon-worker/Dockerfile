@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM ghcr.io/astral-sh/uv:0.9.5 AS uv
 
-FROM python:3.13-slim-bookworm AS build
+FROM python:3.15-slim-bookworm AS build
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/venv
 WORKDIR /src
@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-ins
 COPY recon recon
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
-FROM python:3.13-slim-bookworm AS runtime
+FROM python:3.15-slim-bookworm AS runtime
 RUN useradd --system --uid 10001 --no-create-home recon
 COPY --from=build /venv /venv
 COPY --from=build /src/recon /app/recon
