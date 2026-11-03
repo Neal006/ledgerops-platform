@@ -85,7 +85,7 @@ jobs:
         working-directory: apps/recon-worker
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.2
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: apps/recon-worker/uv.lock
